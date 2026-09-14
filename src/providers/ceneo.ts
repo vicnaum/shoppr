@@ -276,7 +276,8 @@ function parseTiles(html: string, limit?: number): { totalCount: number | null; 
   const seen = new Set<string>();
   // Each product is a `cat-prod-row` container (it holds several data-pid nodes, so
   // splitting on data-pid would scatter name/price across segments).
-  const tiles = html.split(/<div\s+class="cat-prod-row\b/).slice(1);
+  // The class attribute may wrap across lines (`class="\n  cat-prod-row\n  js_…"`).
+  const tiles = html.split(/<div\s+class="\s*cat-prod-row(?=[\s"])/).slice(1);
   for (const t of tiles) {
     const pid = (t.match(/data-pid="(\d+)"/) ?? [])[1];
     if (!pid || seen.has(pid)) continue;
