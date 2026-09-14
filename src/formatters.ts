@@ -73,20 +73,25 @@ export function listingToMarkdown(l: ListingResult): string {
     l.kind === 'offers' ? `Offers for ${l.query}` : l.kind === 'search' ? `Search: ${l.query}` : `Category: ${l.query}`;
   lines.push(`# ${title}`);
   lines.push('');
-  lines.push(`${l.offers.length} result(s).`);
+  const isOffers = l.kind === 'offers';
+  // Every offer of one product shares the product rating, so show it once, not per row.
+  const productRating = isOffers ? l.offers.find((o) => o.rating)?.rating : null;
+  lines.push(`${l.offers.length} result(s).${productRating ? ` Product rating: ${productRating.value} ★ (${productRating.count}).` : ''}`);
   lines.push('');
-  lines.push('| Price | Old | Seller | Rating | Delivery | Title |');
+  lines.push(`| Price | Old | Seller | ${isOffers ? 'Seller rating' : 'Rating'} | Delivery | Title |`);
   lines.push('|---|---|---|---|---|---|');
-  for (const o of l.offers) lines.push(offerRow(o));
+  for (const o of l.offers) lines.push(offerRow(o, isOffers));
   lines.push('');
   lines.push('## Links');
   for (const o of l.offers) lines.push(`- [${truncate(o.title, 70)}](${o.url}) — ${priceStr(o.price)}`);
   return lines.join('\n') + '\n';
 }
 
-function offerRow(o: Offer): string {
+function offerRow(o: Offer, isOffers: boolean): string {
   const seller = `${o.seller ?? '—'}${o.superSeller ? ' ⭐' : ''}`;
-  const rating = o.rating ? `${o.rating.value} (${o.rating.count})` : '—';
+  const rating = isOffers
+    ? o.sellerRating ? `${o.sellerRating.positivePercent}% (${o.sellerRating.count})` : '—'
+    : o.rating ? `${o.rating.value} (${o.rating.count})` : '—';
   const delivery = o.freeDelivery ? 'free' : o.delivery ?? '—';
   return `| ${priceStr(o.price)} | ${o.oldPrice ? priceStr(o.oldPrice) : ''} | ${seller} | ${rating} | ${delivery} | ${truncate(o.title, 60)} |`;
 }

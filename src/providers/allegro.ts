@@ -60,12 +60,14 @@ const truthy = (v: unknown): boolean => v === true || v === 'True' || v === 'tru
 
 // ─── PRODUCT DETAIL ─────────────────────────────────────────────────────────
 
-/** Build a product page URL from a parsed target (uses slug if known, else uuid). */
+/** Build the page URL to scrape from a parsed target. Offer pages (/oferta/<id>)
+ * carry the same ld+json Product as product pages, so they are fetched as-is. */
 function productUrl(t: ParsedTarget): string {
-  if (t.url && /\/produkt\//.test(t.url.pathname)) return t.url.toString();
+  if (t.url && /\/(produkt|oferta)\//.test(t.url.pathname)) return t.url.toString();
   const seg = t.slug ?? t.productId;
-  if (!seg) throw new Error('Cannot build Allegro product URL: need a URL, slug, or product UUID.');
-  return `${BASE}/produkt/${seg}`;
+  if (seg) return `${BASE}/produkt/${seg}`;
+  if (t.offerId) return `${BASE}/oferta/${t.offerId}`;
+  throw new Error('Cannot build Allegro product URL: need a URL, slug, product UUID, or offer id.');
 }
 
 export async function fetchProduct(input: string, ctx: AllegroCtx): Promise<Product> {
@@ -82,7 +84,8 @@ export async function fetchProduct(input: string, ctx: AllegroCtx): Promise<Prod
 
   const ld = extractLdProduct(html);
   const price = extractBuyboxPrice(html);
-  const productId = t.productId ?? extractUuid(html) ?? '';
+  // ld.url is the canonical /produkt/<slug>-<uuid> link — reliable for /oferta/ pages too.
+  const productId = t.productId ?? (typeof ld?.url === 'string' ? extractUuid(ld.url) : null) ?? extractUuid(html) ?? '';
   const offerId = t.offerId ?? extractOfferIdFromLd(ld) ?? null;
 
   return {
@@ -93,7 +96,7 @@ export async function fetchProduct(input: string, ctx: AllegroCtx): Promise<Prod
     title: ld?.name ?? extractTitle(html) ?? '',
     brand: ld?.brand ?? null,
     gtin: ld?.gtin ?? null,
-    image: typeof ld?.image === 'string' ? ld.image : Array.isArray(ld?.image) ? ld.image[0] : null,
+    image: ldImageUrl(ld?.image),
     price,
     description: ld?.description ?? null,
     parameters: extractParameters(html),
@@ -114,6 +117,14 @@ function extractLdProduct(html: string): any | null {
       /* skip */
     }
   }
+  return null;
+}
+
+/** ld+json `image` may be a URL, an ImageObject ({url}), or an array of either. */
+function ldImageUrl(image: unknown): string | null {
+  const first = Array.isArray(image) ? image[0] : image;
+  if (typeof first === 'string') return first;
+  if (first && typeof first === 'object' && typeof (first as any).url === 'string') return (first as any).url;
   return null;
 }
 
@@ -299,6 +310,10 @@ function mapElement(e: any): Offer | null {
     freeDelivery: shipping.freeDelivery !== undefined ? truthy(shipping.freeDelivery) : null,
     delivery: shipping.lowest ? formatMoney(parseFloat(shipping.lowest.amount), shipping.lowest.currency ?? 'PLN') : null,
     rating: rev?.average != null ? { value: Number(rev.average), count: Number(rev.count ?? 0) } : null,
+    sellerRating:
+      seller.positiveFeedbackPercent != null
+        ? { positivePercent: Number(seller.positiveFeedbackPercent), count: Number(seller.positiveFeedbackCount ?? 0) }
+        : null,
     soldCount: e.popularity != null ? Number(e.popularity) : buy.popularity != null ? Number(buy.popularity) : null,
     image: e.mainThumbnail ?? (Array.isArray(e.photos) && e.photos[0]?.url) ?? null,
     sellingMode: sm.buyNow ? 'buyNow' : sm.auction ? 'auction' : sm.advertisement ? 'advertisement' : null,
@@ -322,8 +337,9 @@ export async function fetchOffers(input: string, opts: { limit?: number }, ctx: 
   if (t.url && /\/(produkt|oferty-produktu)\//.test(t.url.pathname)) {
     url = t.url.toString().replace('/produkt/', '/oferty-produktu/');
   } else {
-    const seg = t.slug ?? t.productId;
-    if (!seg) throw new Error('Allegro offers need a product URL, slug, or UUID.');
+    // An /oferta/ link or bare offer id names only an offer — resolve its product first.
+    const seg = t.slug ?? t.productId ?? (t.offerId ? (await fetchProduct(input, ctx)).productId || null : null);
+    if (!seg) throw new Error('Allegro offers need a product URL, slug, UUID, or offer id.');
     url = `${BASE}/oferty-produktu/${seg}`;
   }
   const data = await fetchListingJson(url, ctx);

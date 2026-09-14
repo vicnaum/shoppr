@@ -87,13 +87,10 @@ export function parseAllegroTarget(input: string): ParsedTarget {
   const m = url.pathname.match(/\/(?:produkt|oferty-produktu)\/([^/?#]+)/);
   if (m) out.slug = m[1];
 
-  // /oferta/<slug>-<numericId>
+  // /oferta/<slug>-<numericId> — the slug here names the offer, not the product,
+  // so it must not be reused as a /produkt/ or /oferty-produktu/ segment.
   const off = url.pathname.match(/\/oferta\/(?:.*-)?(\d{6,})$/);
-  if (off) {
-    out.offerId = off[1];
-    const oslug = url.pathname.match(/\/oferta\/([^/?#]+)/);
-    if (oslug) out.slug = oslug[1];
-  }
+  if (off) out.offerId = off[1];
 
   return out;
 }

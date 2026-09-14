@@ -65,7 +65,10 @@ export interface Offer {
   superSeller: boolean;
   freeDelivery: boolean | null;
   delivery: string | null; // human delivery summary / cost
+  /** The product's review rating — identical across all offers of one product. */
   rating: { value: number; count: number } | null;
+  /** The seller's own feedback score, when the store exposes it (Allegro: % positive). */
+  sellerRating?: { positivePercent: number; count: number } | null;
   soldCount: number | null;
   image: string | null;
   sellingMode: string | null; // buyNow | auction | advertisement

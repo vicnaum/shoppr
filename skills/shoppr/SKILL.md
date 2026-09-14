@@ -116,7 +116,7 @@ Flags: `-l/--limit <n>` (0 = all pages, default 0), `--page <n>` (fetch only tha
 shoppr offers <product-url|uuid> --limit 30 -f json -o /tmp/shoppr
 ```
 
-**All three** return every seller's offer for one product (`price`, `seller`, `url`, …), cheapest-first. Allegro needs its cookie; **Ceneo** and **Amazon** need none (Amazon uses the AOD all-offers endpoint).
+**All three** return every seller's offer for one product (`price`, `seller`, `url`, …), cheapest-first. Each offer's `rating` is the *product's* rating (same on every row); Allegro also gives `sellerRating` (`positivePercent` + `count`), which the markdown table shows as "Seller rating". Offers also accept an `/oferta/` link or bare offer id (Allegro resolves its product first). Allegro needs its cookie; **Ceneo** and **Amazon** need none (Amazon uses the AOD all-offers endpoint).
 
 ### Search / Category
 
