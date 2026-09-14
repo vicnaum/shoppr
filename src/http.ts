@@ -3,8 +3,68 @@
 // backoff, and detection of bot-wall (DataDome) responses so we can surface a
 // helpful "refresh your cookie" error instead of a cryptic 403.
 
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from 'undici';
-import type { ResolvedProxy } from './config.js';
+import { getConfigDir, type ResolvedProxy } from './config.js';
+
+/** Minimum gap between requests per bot-protected host. Allegro's DataDome flags
+ * the session cookie after a burst of ~30 quick page loads, so requests are
+ * spaced like a human browsing. Hosts not listed (Ceneo, edge.allegro.pl
+ * reviews) are not throttled. Override with SHOPPR_MIN_GAP_MS (0 disables). */
+const MIN_GAP_MS: Record<string, number> = { 'allegro.pl': 4000, 'www.amazon.pl': 1500 };
+const GAP_JITTER_MS = 2000;
+const STALE_LOCK_MS = 60_000;
+
+/** Wait until this host's gap has passed since the last request made by ANY shoppr
+ * process (parallel agents included): a timestamp file under the config dir,
+ * guarded by an exclusive lock file that is held while sleeping. */
+async function throttle(url: string, debug?: boolean): Promise<void> {
+  const host = new URL(url).hostname;
+  const base = MIN_GAP_MS[host];
+  if (base === undefined) return;
+  const override = process.env.SHOPPR_MIN_GAP_MS;
+  const gap = override !== undefined && override !== '' ? Number(override) : base;
+  if (!(gap > 0)) return;
+
+  const dir = getConfigDir();
+  mkdirSync(dir, { recursive: true });
+  const stamp = join(dir, `.last-request-${host}`);
+  const lock = `${stamp}.lock`;
+  for (;;) {
+    try {
+      closeSync(openSync(lock, 'wx'));
+      break;
+    } catch {
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS) unlinkSync(lock);
+      } catch {
+        /* lock vanished between checks — retry */
+      }
+      await sleep(200);
+    }
+  }
+  try {
+    let last = 0;
+    try {
+      last = Number(readFileSync(stamp, 'utf8')) || 0;
+    } catch {
+      /* first request to this host */
+    }
+    const wait = last + gap + Math.random() * GAP_JITTER_MS - Date.now();
+    if (wait > 0) {
+      if (debug) console.error(`  [throttle] ${host}: waiting ${Math.round(wait)}ms`);
+      await sleep(wait);
+    }
+    writeFileSync(stamp, String(Date.now()));
+  } finally {
+    try {
+      unlinkSync(lock);
+    } catch {
+      /* already gone */
+    }
+  }
+}
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
@@ -63,6 +123,9 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<string
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // Wait for our turn before arming the timeout, so queueing behind other
+    // shoppr processes can't eat into (or abort) the request's own time budget.
+    await throttle(url, opts.debug);
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
