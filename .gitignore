@@ -5,3 +5,7 @@ output/
 *.log
 *.har
 .DS_Store
+
+# Scratch files and personal exports that don't belong in this public repo
+tmp_*
+chat-exports/
